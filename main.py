@@ -1,14 +1,18 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 import os
 import uvicorn
+from datetime import datetime
+
+# Import services
+from services import load_services
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Minimal FastAPI App",
-    description="A minimal FastAPI application with security best practices",
+    title="Modular FastAPI Application",
+    description="A modular FastAPI application with security best practices and pluggable services",
     version="1.0.0"
 )
 
@@ -26,20 +30,28 @@ app.add_middleware(
     allowed_hosts=os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 )
 
+# Load all services
+services_router = load_services()
+app.include_router(services_router)
+
 @app.get("/")
 async def root():
     """Root endpoint - health check"""
-    return {"message": "Hello World", "status": "healthy"}
+    return {
+        "message": "Modular FastAPI Application",
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "services": ["security_scanner"]
+    }
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "timestamp": "2025-01-19T23:16:46.058Z"}
-
-@app.get("/api/v1/test")
-async def test_endpoint():
-    """Test endpoint for API functionality"""
-    return {"message": "API is working", "data": "test"}
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "environment": os.getenv("ENVIRONMENT", "development")
+    }
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
