@@ -6,6 +6,10 @@ import os
 import uvicorn
 import logging
 from datetime import datetime, timezone
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import services
 from services import load_services
@@ -87,8 +91,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         status_code=exc.status_code,
         content={
             "error": "Request failed",
-            "error_code": f"HTTP_{exc.status_code}",
-In main.py at lines 91, 105, 119, and 128, replace all uses of datetime.utcnow() with datetime.now(timezone.utc) to create timezone-aware datetime objects consistently. This involves importing timezone from datetime if not already done and updating each line accordingly to ensure all timestamps are timezone-aware and consistent throughout the module.
+            "error_code": f"HTTP_{exc.status_code}"
         }
     )
 
