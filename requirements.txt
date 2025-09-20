@@ -6,3 +6,5 @@ python-nmap==0.7.1
 aiofiles==24.1.0
 redis==6.4.0
 slowapi==0.1.9
+celery==5.3.4
+flower==2.0.1
