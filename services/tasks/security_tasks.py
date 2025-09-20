@@ -74,8 +74,9 @@ def perform_security_scan(
         # Process results
         results = {}
         for target in targets:
-            if target in scan_result['scan']:
-                host_data = scan_result['scan'][target]
+            if target in scan_result:
+                # scan_result already contains the parsed host data
+                host_data = scan_result[target]
                 scan_target = _parse_nmap_results(host_data)
                 results[target] = scan_target
             else:
@@ -143,13 +144,13 @@ def _get_scan_arguments(scan_type: str, ports: str, timeout: int) -> List[str]:
 
     # Add scan type specific arguments
     if validated_scan_type == "basic":
-        base_args.extend(["-sS", f"-p={validated_ports}"])
+        base_args.extend(["-sS", "-p", validated_ports])
     elif validated_scan_type == "comprehensive":
-        base_args.extend(["-sS", "-sV", f"-p={validated_ports}", "--script=banner"])
+        base_args.extend(["-sS", "-sV", "-p", validated_ports, "--script=banner"])
     elif validated_scan_type == "custom":
-        base_args.extend(["-sS", "-sV", f"-p={validated_ports}"])
+        base_args.extend(["-sS", "-sV", "-p", validated_ports])
     else:
-        base_args.extend(["-sS", f"-p={validated_ports}"])
+        base_args.extend(["-sS", "-p", validated_ports])
 
     return base_args
 
