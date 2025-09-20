@@ -101,8 +101,18 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
 
-    # Content Security Policy for API endpoints
-    response.headers["Content-Security-Policy"] = "default-src 'none'"
+    # Content Security Policy - allow Swagger UI resources for docs
+    if request.url.path == "/docs":
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' https://fastapi.tiangolo.com data:; "
+            "connect-src 'self'"
+        )
+    else:
+        # Strict CSP for API endpoints
+        response.headers["Content-Security-Policy"] = "default-src 'none'"
 
     # Remove server information
     if "Server" in response.headers:
@@ -154,6 +164,58 @@ from services.monitoring import create_monitoring_router
 # Add admin interface router
 from services.admin_interface import create_admin_router
 app.include_router(create_admin_router())
+
+# Initialize database on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database and services on startup"""
+    init_database()
+    logger.info("Database initialized successfully")
+
+    # Initialize scanner service
+    try:
+        from services.infrastructure.cenexo_scanner import CenexoScannerService
+        from services.database_models import Tenant
+        from services.database import get_db
+        from sqlalchemy.orm import Session
+
+        # Use get_db generator properly to get a database session
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            # Check if default tenant exists
+            default_tenant = db.query(Tenant).filter(Tenant.name == "default").first()
+            if not default_tenant:
+                # Create default tenant
+                default_tenant = Tenant(
+                    name="default",
+                    domain="localhost",
+                    is_active=True,
+                    max_users=10,
+                    max_services=5
+                )
+                db.add(default_tenant)
+                db.commit()
+                db.refresh(default_tenant)
+                logger.info(f"Created default tenant: {default_tenant.uuid}")
+
+            # Create scanner service instance and add routes
+            scanner_service = CenexoScannerService(tenant=default_tenant)
+            app.include_router(
+                scanner_service.router,
+                prefix="/api/v1/cenexo-scanner",
+                tags=["cenexo-scanner"]
+            )
+            logger.info("Cenexo Scanner service initialized successfully")
+
+        except Exception as e:
+            logger.error(f"Error initializing scanner service: {e}")
+            raise
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Failed to initialize scanner service: {e}")
 
 # Initialize database when running as main script
 if __name__ == "__main__":

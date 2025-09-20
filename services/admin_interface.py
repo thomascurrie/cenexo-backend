@@ -64,7 +64,25 @@ def create_admin_router():
         current_user: User = Depends(require_admin())
     ):
         """Create a new tenant"""
+        tenant_name = tenant_data.get("name", "unknown")
+
         try:
+            # Validate required fields
+            if not tenant_data.get("name"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tenant name is required"
+                )
+
+            if not tenant_data.get("admin_password"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Admin password is required for tenant creation"
+                )
+
+            # Log tenant creation attempt
+            logger.info(f"Attempting to create tenant: {tenant_name} by user: {current_user.username}")
+
             # Create tenant using transaction context
             tenant = tenant_manager.create_tenant(
                 db=db,
@@ -75,12 +93,6 @@ def create_admin_router():
 
             # Create default admin user for the tenant within the same transaction
             admin_password = tenant_data.get("admin_password")
-            if not admin_password:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Admin password is required for tenant creation"
-                )
-
             admin_user = User(
                 tenant_id=tenant.id,
                 username=f"admin_{tenant.name}",
@@ -93,7 +105,10 @@ def create_admin_router():
             db.commit()
             db.refresh(admin_user)
 
-            # Log tenant creation
+            # Log successful tenant creation
+            logger.info(f"Successfully created tenant: {tenant.name} (ID: {tenant.uuid}) with admin user: {admin_user.username}")
+
+            # Log tenant creation to audit log
             enhanced_logger.log_tenant_created(tenant, current_user)
 
             return {
@@ -110,9 +125,24 @@ def create_admin_router():
                 }
             }
 
+        except HTTPException:
+            # Re-raise HTTP exceptions as-is (they already have proper error messages)
+            raise
         except Exception as e:
+            # Log the error for debugging
+            logger.error(f"Failed to create tenant '{tenant_name}': {str(e)}")
             db.rollback()
-            raise HTTPException(status_code=400, detail=str(e))
+
+            # Provide user-friendly error message
+            error_message = f"Failed to create tenant '{tenant_name}'"
+            if "already exists" in str(e):
+                error_message = f"Tenant '{tenant_name}' already exists. Please choose a different name."
+            elif "unique constraint" in str(e).lower():
+                error_message = f"A tenant with the name '{tenant_name}' already exists. Please choose a different name."
+            elif "domain" in str(e).lower() and "already exists" in str(e).lower():
+                error_message = f"The domain is already in use by another tenant. Please choose a different domain."
+
+            raise HTTPException(status_code=400, detail=error_message)
 
     @router.get("/tenants/{tenant_id}")
     async def get_tenant(

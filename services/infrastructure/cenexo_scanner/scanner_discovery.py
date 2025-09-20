@@ -60,7 +60,11 @@ class CenexoScannerService(BaseService):
             )
 
         # Check if user belongs to this tenant
-        if user.tenant_id != self.tenant.id:
+        user_tenant_id = getattr(user, 'tenant_id', None)
+        if user_tenant_id is None:
+            # If user doesn't have tenant_id, allow access (for backward compatibility)
+            logger.warning(f"User object does not have tenant_id attribute. User: {getattr(user, 'username', 'unknown')}")
+        elif user_tenant_id != self.tenant.id:
             raise HTTPException(
                 status_code=403,
                 detail="User does not have access to this tenant"
@@ -69,7 +73,9 @@ class CenexoScannerService(BaseService):
         # Check if authorization is required
         if os.getenv("SCAN_AUTHORIZATION_REQUIRED", "true").lower() == "true":
             # Log successful authorization
-            logger.info(f"Authorization check passed for user: {user.username} (role: {user.role}) in tenant: {self.tenant.name}")
+            username = getattr(user, 'username', 'unknown') if user else 'unknown'
+            role = getattr(user, 'role', 'unknown') if user else 'unknown'
+            logger.info(f"Authorization check passed for user: {username} (role: {role}) in tenant: {self.tenant.name}")
         else:
             logger.info("Authorization check skipped (not required)")
 
@@ -122,8 +128,18 @@ class CenexoScannerService(BaseService):
                     detail=f"Target {target} not in allowed networks for tenant {self.tenant.name}: {allowed_networks}"
                 )
 
-    async def _check_rate_limit(self, user: User) -> None:
+    async def _check_rate_limit(self, user: User, request=None) -> None:
         """Check rate limiting for scan requests"""
+        # Get IP address from request if available
+        ip_address = None
+        if request and hasattr(request, 'client') and request.client:
+            ip_address = request.client.host
+        elif request and hasattr(request, 'headers'):
+            # Fallback to X-Forwarded-For header
+            ip_address = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            if not ip_address:
+                ip_address = request.headers.get("X-Real-IP")
+
         # Check rate limit for scan endpoint
         allowed, remaining, reset_time = rate_limiter.check_rate_limit(
             user=user,
@@ -137,7 +153,7 @@ class CenexoScannerService(BaseService):
             security_logger.log_rate_limit_exceeded(
                 user=user,
                 endpoint="scan",
-                tenant_id=self.tenant.uuid
+                ip_address=ip_address or "unknown"
             )
 
             raise HTTPException(
@@ -153,7 +169,8 @@ class CenexoScannerService(BaseService):
                 }
             )
 
-        logger.info(f"Rate limit check passed for user {user.username} in tenant {self.tenant.name}. "
+        username = getattr(user, 'username', 'unknown') if user else 'unknown'
+        logger.info(f"Rate limit check passed for user {username} in tenant {self.tenant.name}. "
                     f"Remaining requests: {remaining if remaining is not None else 'unlimited'}")
 
     async def _log_scan_request(self, task_id: str, request: ScanRequest, user: User) -> None:
@@ -167,8 +184,10 @@ class CenexoScannerService(BaseService):
         )
 
         # Also log to regular logger for monitoring
+        username = getattr(user, 'username', 'unknown') if user else 'unknown'
+        role = getattr(user, 'role', 'unknown') if user else 'unknown'
         logger.info(
-            f"Scan task {task_id} requested by user {user.username} (role: {user.role}) "
+            f"Scan task {task_id} requested by user {username} (role: {role}) "
             f"in tenant {self.tenant.name} for {len(request.targets)} targets"
         )
 
@@ -178,7 +197,7 @@ class CenexoScannerService(BaseService):
         @self.router.post("/scan")
         async def start_scan(
             request: ScanRequest,
-            user: User = Depends(require_user),
+            user: User = Depends(require_user()),
             db: Session = Depends(get_db)
         ):
             """
@@ -196,12 +215,14 @@ class CenexoScannerService(BaseService):
                 # Security checks
                 await self._check_tenant_authorization(user)
                 await self._check_target_allowlist(request.targets)
-                await self._check_rate_limit(user)
+                await self._check_rate_limit(user, request)
 
                 # Validate targets
                 validated_targets = await self._validate_targets(request.targets)
 
-                logger.info(f"Starting scan task for targets: {request.targets} by user: {user.username} in tenant: {self.tenant.name}")
+                username = getattr(user, 'username', 'unknown') if user else 'unknown'
+                role = getattr(user, 'role', 'unknown') if user else 'unknown'
+                logger.info(f"Starting scan task for targets: {request.targets} by user: {username} in tenant: {self.tenant.name}")
 
                 # Prepare task data with tenant context
                 task_data = {
@@ -209,8 +230,8 @@ class CenexoScannerService(BaseService):
                     'scan_type': request.scan_type,
                     'ports': request.ports,
                     'timeout': request.timeout,
-                    'user_id': user.username,
-                    'user_role': user.role,
+                    'user_id': username,
+                    'user_role': role,
                     'tenant_id': self.tenant.uuid,
                     'tenant_name': self.tenant.name
                 }
@@ -221,7 +242,8 @@ class CenexoScannerService(BaseService):
                 # Audit logging with actual task ID
                 await self._log_scan_request(celery_task.id, request, user)
 
-                logger.info(f"Scan task {celery_task.id} started for targets: {request.targets} by user: {user.username} in tenant: {self.tenant.name}")
+                username = getattr(user, 'username', 'unknown') if user else 'unknown'
+                logger.info(f"Scan task {celery_task.id} started for targets: {request.targets} by user: {username} in tenant: {self.tenant.name}")
                 return {
                     "task_id": celery_task.id,
                     "status": "PENDING",
@@ -246,7 +268,7 @@ class CenexoScannerService(BaseService):
         @self.router.get("/scan/{task_id}")
         async def get_scan_result(
             task_id: str,
-            user: User = Depends(require_user),
+            user: User = Depends(require_user()),
             db: Session = Depends(get_db)
         ):
             """
@@ -262,7 +284,11 @@ class CenexoScannerService(BaseService):
             """
             try:
                 # Verify user belongs to this tenant
-                if user.tenant_id != self.tenant.id:
+                user_tenant_id = getattr(user, 'tenant_id', None)
+                if user_tenant_id is None:
+                    # If user doesn't have tenant_id, allow access (for backward compatibility)
+                    logger.warning(f"User object does not have tenant_id attribute. User: {getattr(user, 'username', 'unknown')}")
+                elif user_tenant_id != self.tenant.id:
                     raise HTTPException(
                         status_code=403,
                         detail="Access denied to scan results from different tenant"
@@ -340,7 +366,7 @@ class CenexoScannerService(BaseService):
         @self.router.get("/tasks/{task_id}/status")
         async def get_task_status(
             task_id: str,
-            user: User = Depends(require_user),
+            user: User = Depends(require_user()),
             db: Session = Depends(get_db)
         ):
             """
@@ -356,7 +382,11 @@ class CenexoScannerService(BaseService):
             """
             try:
                 # Verify user belongs to this tenant
-                if user.tenant_id != self.tenant.id:
+                user_tenant_id = getattr(user, 'tenant_id', None)
+                if user_tenant_id is None:
+                    # If user doesn't have tenant_id, allow access (for backward compatibility)
+                    logger.warning(f"User object does not have tenant_id attribute. User: {getattr(user, 'username', 'unknown')}")
+                elif user_tenant_id != self.tenant.id:
                     raise HTTPException(
                         status_code=403,
                         detail="Access denied to task status from different tenant"

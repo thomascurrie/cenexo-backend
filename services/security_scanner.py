@@ -84,8 +84,18 @@ class SecurityScannerService(BaseService):
                     detail=f"Target {target} not in allowed networks: {allowed_networks}"
                 )
 
-    async def _check_rate_limit(self, user):
+    async def _check_rate_limit(self, user, request=None):
         """Check rate limiting for scan requests"""
+        # Get IP address from request if available
+        ip_address = None
+        if request and hasattr(request, 'client') and request.client:
+            ip_address = request.client.host
+        elif request and hasattr(request, 'headers'):
+            # Fallback to X-Forwarded-For header
+            ip_address = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            if not ip_address:
+                ip_address = request.headers.get("X-Real-IP")
+
         # Check rate limit for scan endpoint
         allowed, remaining, reset_time = rate_limiter.check_rate_limit(
             user=user,
@@ -98,7 +108,8 @@ class SecurityScannerService(BaseService):
             # Log rate limit violation
             security_logger.log_rate_limit_exceeded(
                 user=user,
-                endpoint="scan"
+                endpoint="scan",
+                ip_address=ip_address or "unknown"
             )
 
             raise HTTPException(
@@ -137,7 +148,7 @@ class SecurityScannerService(BaseService):
         @self.router.post("/scan")
         async def start_scan(
             request: ScanRequest,
-            user = Depends(require_user)
+            user = Depends(require_user())
         ):
             """
             Start a security scan task on the specified targets.
@@ -153,7 +164,7 @@ class SecurityScannerService(BaseService):
                 # Security checks
                 await self._check_authorization(user)
                 self._check_target_allowlist(request.targets)
-                await self._check_rate_limit(user)
+                await self._check_rate_limit(user, request)
 
                 # Validate targets
                 validated_targets = await self._validate_targets(request.targets)
@@ -200,7 +211,7 @@ class SecurityScannerService(BaseService):
         @self.router.get("/scan/{task_id}")
         async def get_scan_result(
             task_id: str,
-            user = Depends(require_viewer)
+            user = Depends(require_viewer())
         ):
             """
             Retrieve a scan result by task ID.
@@ -282,7 +293,7 @@ class SecurityScannerService(BaseService):
         @self.router.get("/tasks/{task_id}/status")
         async def get_task_status(
             task_id: str,
-            user = Depends(require_viewer)
+            user = Depends(require_viewer())
         ):
             """
             Get the status of a scan task.

@@ -103,15 +103,25 @@ class EnhancedLogger:
         )
 
     def log_audit_event(self, db: Optional[Session], tenant: Optional[Tenant] = None,
-                       user: Optional[User] = None, action: str = "UNKNOWN",
-                       resource_type: str = "unknown", resource_id: str = "",
-                       details: dict = None, ip_address: str = None,
-                       user_agent: str = None):
+                        user: Optional[User] = None, action: str = "UNKNOWN",
+                        resource_type: str = "unknown", resource_id: str = "",
+                        details: dict = None, ip_address: str = None,
+                        user_agent: str = None):
         """Log audit event to database"""
         try:
+            # Handle different User object types (Auth User vs Database User)
+            user_id = None
+            if user:
+                # Check if it's a database User (has id attribute)
+                if hasattr(user, 'id'):
+                    user_id = user.id
+                # Otherwise, try to get user_id from details or use None
+                elif details and 'user_id' in details:
+                    user_id = details['user_id']
+
             audit_log = AuditLog(
                 tenant_id=tenant.id if tenant else None,
-                user_id=user.id if user else None,
+                user_id=user_id,
                 action=action,
                 resource_type=resource_type,
                 resource_id=resource_id,
@@ -127,11 +137,24 @@ class EnhancedLogger:
                 db.commit()
 
             # Always log to file
+            # Handle different User object types for logging
+            user_identifier = None
+            if user:
+                # Check if it's a database User (has username attribute)
+                if hasattr(user, 'username'):
+                    user_identifier = user.username
+                # Check if it's a database User (has uuid attribute)
+                elif hasattr(user, 'uuid'):
+                    user_identifier = user.uuid
+                # Otherwise, try to get from details
+                elif details and 'user_id' in details:
+                    user_identifier = details['user_id']
+
             self.audit_logger.info(
                 f"AUDIT: {action} - {resource_type} - {resource_id}",
                 extra={
                     "tenant_id": tenant.uuid if tenant else None,
-                    "user_id": user.username if user else None,
+                    "user_id": user_identifier,
                     "details": details or {}
                 }
             )
@@ -141,36 +164,39 @@ class EnhancedLogger:
 
     def log_rate_limit_exceeded(self, user: User, endpoint: str, tenant_id: str):
         """Log rate limit violation"""
+        username = safe_get_user_attr(user, 'username', 'unknown')
         self.log_security_event(
             event_type="RATE_LIMIT_EXCEEDED",
             severity="medium",
             details={
                 "endpoint": endpoint,
-                "user_id": user.username,
+                "user_id": username,
                 "tenant_id": tenant_id
             },
             tenant_id=tenant_id,
-            user_id=user.username
+            user_id=username
         )
 
     def log_scan_started(self, user: User, targets: list, scan_type: str, tenant_id: str):
         """Log scan start event"""
+        username = safe_get_user_attr(user, 'username', 'unknown')
         self.log_scan_activity(
             action="STARTED",
             targets=targets,
             scan_type=scan_type,
-            user_id=user.username,
+            user_id=username,
             tenant_id=tenant_id
         )
 
     def log_scan_completed(self, user: User, targets: list, scan_type: str,
-                          tenant_id: str, task_id: str, duration: float):
+                           tenant_id: str, task_id: str, duration: float):
         """Log scan completion event"""
+        username = safe_get_user_attr(user, 'username', 'unknown')
         self.log_scan_activity(
             action="COMPLETED",
             targets=targets,
             scan_type=scan_type,
-            user_id=user.username,
+            user_id=username,
             tenant_id=tenant_id,
             task_id=task_id
         )
@@ -183,13 +209,14 @@ class EnhancedLogger:
         )
 
     def log_scan_failed(self, user: User, targets: list, scan_type: str,
-                       tenant_id: str, task_id: str, error: str):
+                        tenant_id: str, task_id: str, error: str):
         """Log scan failure event"""
+        username = safe_get_user_attr(user, 'username', 'unknown')
         self.log_scan_activity(
             action="FAILED",
             targets=targets,
             scan_type=scan_type,
-            user_id=user.username,
+            user_id=username,
             tenant_id=tenant_id,
             task_id=task_id
         )
@@ -239,6 +266,17 @@ class EnhancedLogger:
             error=error,
             tenant_id=tenant_id
         )
+
+def safe_get_user_attr(user, attr_name, default=None):
+    """Safely get user attribute, handling different User object types"""
+    if not user:
+        return default
+
+    # Check if attribute exists
+    if hasattr(user, attr_name):
+        return getattr(user, attr_name)
+
+    return default
 
 # Global enhanced logger instance
 enhanced_logger = EnhancedLogger()

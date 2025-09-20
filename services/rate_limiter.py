@@ -20,8 +20,19 @@ class RateLimiter:
     def __init__(self):
         """Initialize the rate limiter with Redis connection."""
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = None
         self.enabled = os.getenv("RATE_LIMITING_ENABLED", "true").lower() == "true"
+
+        # Try to connect to Redis
+        try:
+            self.redis_client = redis.from_url(redis_url, decode_responses=True)
+            # Test the connection
+            self.redis_client.ping()
+            logger.info("Redis connection established for rate limiting")
+        except redis.RedisError as e:
+            logger.warning(f"Redis connection failed: {e}. Rate limiting will be disabled.")
+            self.redis_client = None
+            self.enabled = False
 
     def _get_redis_key(self, identifier: str, endpoint: str) -> str:
         """Generate Redis key for rate limiting."""
@@ -72,6 +83,11 @@ class RateLimiter:
 
         # Create Redis key
         redis_key = self._get_redis_key(user_id, endpoint)
+
+        # Check if Redis is available
+        if not self.redis_client:
+            logger.debug(f"Rate limiting disabled (no Redis connection) for {user_id} on {endpoint}")
+            return True, None, None
 
         try:
             # Use Redis pipeline for atomic operations
@@ -124,6 +140,28 @@ class RateLimiter:
         """
         user_id = self._get_user_identifier(user)
         redis_key = self._get_redis_key(user_id, endpoint)
+
+        # Check if Redis is available
+        if not self.redis_client:
+            # Get limits based on user role
+            if user and hasattr(user, 'role'):
+                if user.role == "admin":
+                    limit = int(os.getenv("RATE_LIMIT_ADMIN", "100"))
+                elif user.role == "user":
+                    limit = int(os.getenv("RATE_LIMIT_USER", "20"))
+                else:
+                    limit = int(os.getenv("RATE_LIMIT_VIEWER", "10"))
+            else:
+                limit = int(os.getenv("RATE_LIMIT_ANONYMOUS", "5"))
+
+            return {
+                "current_count": 0,
+                "limit": limit,
+                "remaining": limit,
+                "reset_in_seconds": 0,
+                "reset_time": None,
+                "note": "Rate limiting disabled (no Redis connection)"
+            }
 
         try:
             current_count = int(self.redis_client.get(redis_key) or 0)

@@ -156,17 +156,21 @@ class SecurityLogger:
             user_agent=user_agent
         )
 
-    def log_scan_started(self, user, targets: list, scan_type: str, ip_address: str = None):
+    def log_scan_started(self, user, targets: list, scan_type: str, ip_address: str = None, tenant_id: str = None):
         """Log scan initiation."""
+        details = {
+            "targets": targets,
+            "scan_type": scan_type,
+            "target_count": len(targets)
+        }
+        if tenant_id:
+            details["tenant_id"] = tenant_id
+
         self.log_security_event(
             SecurityEventType.SCAN_STARTED,
             user=user,
             resource="security_scan",
-            details={
-                "targets": targets,
-                "scan_type": scan_type,
-                "target_count": len(targets)
-            },
+            details=details,
             ip_address=ip_address
         )
 
