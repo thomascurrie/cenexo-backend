@@ -5,6 +5,7 @@ Enhanced security scanner with multi-tenant support and improved architecture.
 
 import asyncio
 import logging
+import socket
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 from fastapi import HTTPException, Depends
@@ -73,7 +74,7 @@ class CenexoScannerService(BaseService):
         else:
             logger.info("Authorization check skipped (not required)")
 
-    def _check_target_allowlist(self, targets: List[str]) -> None:
+    async def _check_target_allowlist(self, targets: List[str]) -> None:
         """Check if targets are in the allowed networks for this tenant"""
         allowed_networks = self.config.get("allowed_networks", "")
         if not allowed_networks:
@@ -94,20 +95,24 @@ class CenexoScannerService(BaseService):
                     except ValueError:
                         logger.warning(f"Invalid network in allowlist for tenant {self.tenant.name}: {net_str}")
             except ValueError:
-                # Target is hostname, resolve to IP and check
+                # Target is hostname, resolve to IP and check asynchronously
                 try:
-                    import socket
-                    resolved_ip = socket.gethostbyname(target)
-                    resolved_ip_obj = ipaddress.ip_address(resolved_ip)
-                    for net_str in allowed_nets:
-                        try:
-                            net = ipaddress.ip_network(net_str.strip(), strict=False)
-                            if resolved_ip_obj in net:
-                                target_allowed = True
-                                break
-                        except ValueError:
-                            logger.warning(f"Invalid network in allowlist for tenant {self.tenant.name}: {net_str}")
-                except socket.gaierror:
+                    # Use asyncio.get_event_loop().getaddrinfo for async DNS resolution
+                    loop = asyncio.get_event_loop()
+                    addr_info = await loop.getaddrinfo(target, None)
+                    if addr_info:
+                        # Get the first IP address from the resolved addresses
+                        resolved_ip = addr_info[0][4][0]
+                        resolved_ip_obj = ipaddress.ip_address(resolved_ip)
+                        for net_str in allowed_nets:
+                            try:
+                                net = ipaddress.ip_network(net_str.strip(), strict=False)
+                                if resolved_ip_obj in net:
+                                    target_allowed = True
+                                    break
+                            except ValueError:
+                                logger.warning(f"Invalid network in allowlist for tenant {self.tenant.name}: {net_str}")
+                except Exception:
                     logger.warning(f"Could not resolve hostname: {target}")
                     # If hostname cannot be resolved, deny access
                     target_allowed = False
@@ -191,7 +196,7 @@ class CenexoScannerService(BaseService):
             try:
                 # Security checks
                 await self._check_tenant_authorization(user)
-                self._check_target_allowlist(request.targets)
+                await self._check_target_allowlist(request.targets)
                 await self._check_rate_limit(user)
 
                 # Validate targets
