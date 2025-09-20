@@ -158,9 +158,6 @@ class SecurityScannerService(BaseService):
                 # Validate targets
                 validated_targets = await self._validate_targets(request.targets)
 
-                # Audit logging
-                task_id = await self._log_scan_request("pending", request, user)
-
                 logger.info(f"Starting scan task for targets: {request.targets} by user: {user.username}")
 
                 # Prepare task data
@@ -175,6 +172,9 @@ class SecurityScannerService(BaseService):
 
                 # Trigger Celery task
                 celery_task = perform_security_scan.delay(task_data)
+
+                # Audit logging with actual task ID
+                await self._log_scan_request(celery_task.id, request, user)
 
                 logger.info(f"Scan task {celery_task.id} started for targets: {request.targets} by user: {user.username}")
                 return {

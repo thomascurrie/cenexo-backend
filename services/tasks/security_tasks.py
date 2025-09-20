@@ -7,7 +7,6 @@ import nmap
 import time
 import logging
 import subprocess
-import shlex
 from typing import Dict, List, Any
 from datetime import datetime, timezone
 from celery import current_task
@@ -138,6 +137,9 @@ def _get_scan_arguments(scan_type: str, ports: str, timeout: int) -> List[str]:
 
     # Build argument list securely
     base_args = ["nmap", "-T3", f"--host-timeout={validated_timeout}s"]
+
+    # Add XML output to stdout for parsing
+    base_args.extend(["-oX", "-"])
 
     # Add scan type specific arguments
     if validated_scan_type == "basic":

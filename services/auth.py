@@ -5,6 +5,7 @@ Provides API key and JWT token authentication with role-based access control.
 
 import os
 import logging
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from enum import Enum
@@ -21,7 +22,9 @@ logger = logging.getLogger(__name__)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT settings
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("JWT_SECRET_KEY environment variable must be set")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -58,6 +61,9 @@ class AuthService:
             Dictionary of username -> User objects
         """
         users = {}
+        admin_counter = 0
+        user_counter = 0
+        viewer_counter = 0
 
         # Load admin users
         admin_api_keys = os.getenv("ADMIN_API_KEYS", "")
@@ -65,8 +71,9 @@ class AuthService:
             for api_key in admin_api_keys.split(","):
                 api_key = api_key.strip()
                 if api_key:
-                    users[f"admin_{len(users)}"] = User(
-                        username=f"admin_{len(users)}",
+                    admin_counter += 1
+                    users[f"admin_{admin_counter}"] = User(
+                        username=f"admin_{admin_counter}",
                         role=UserRole.ADMIN,
                         api_key=api_key
                     )
@@ -77,8 +84,9 @@ class AuthService:
             for api_key in user_api_keys.split(","):
                 api_key = api_key.strip()
                 if api_key:
-                    users[f"user_{len(users)}"] = User(
-                        username=f"user_{len(users)}",
+                    user_counter += 1
+                    users[f"user_{user_counter}"] = User(
+                        username=f"user_{user_counter}",
                         role=UserRole.USER,
                         api_key=api_key
                     )
@@ -89,8 +97,9 @@ class AuthService:
             for api_key in viewer_api_keys.split(","):
                 api_key = api_key.strip()
                 if api_key:
-                    users[f"viewer_{len(users)}"] = User(
-                        username=f"viewer_{len(users)}",
+                    viewer_counter += 1
+                    users[f"viewer_{viewer_counter}"] = User(
+                        username=f"viewer_{viewer_counter}",
                         role=UserRole.VIEWER,
                         api_key=api_key
                     )
@@ -100,7 +109,7 @@ class AuthService:
 
     def authenticate_api_key(self, api_key: str) -> Optional[User]:
         """
-        Authenticate using API key.
+        Authenticate using API key with timing-safe comparison.
 
         Args:
             api_key: API key to authenticate
@@ -109,7 +118,7 @@ class AuthService:
             User object if authenticated, None otherwise
         """
         for user in self.users.values():
-            if user.api_key == api_key and user.is_active:
+            if hmac.compare_digest(user.api_key, api_key) and user.is_active:
                 return user
         return None
 

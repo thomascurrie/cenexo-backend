@@ -88,7 +88,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         content={
             "error": "Request failed",
             "error_code": f"HTTP_{exc.status_code}",
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+In main.py at lines 91, 105, 119, and 128, replace all uses of datetime.utcnow() with datetime.now(timezone.utc) to create timezone-aware datetime objects consistently. This involves importing timezone from datetime if not already done and updating each line accordingly to ensure all timestamps are timezone-aware and consistent throughout the module.
         }
     )
 

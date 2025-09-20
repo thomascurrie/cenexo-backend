@@ -6,6 +6,7 @@ Provides structured logging for security events and compliance.
 import os
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from enum import Enum
@@ -32,20 +33,54 @@ class SecurityLogger:
     def __init__(self):
         """Initialize the security logger."""
         self.audit_enabled = os.getenv("SCAN_AUDIT_LOG_ENABLED", "true").lower() == "true"
-        self.log_file = os.getenv("SECURITY_LOG_FILE", "security_audit.log")
+        self.log_file = self._validate_log_file_path(
+            os.getenv("SECURITY_LOG_FILE", "security_audit.log")
+        )
 
         # Setup security logger
         self.security_logger = logging.getLogger("security_audit")
         self.security_logger.setLevel(logging.INFO)
 
-        # File handler for security logs
+        # File handler for security logs with rotation
         if self.audit_enabled:
-            handler = logging.FileHandler(self.log_file)
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
-            self.security_logger.addHandler(handler)
+            try:
+                # Use RotatingFileHandler for log rotation
+                handler = RotatingFileHandler(
+                    self.log_file,
+                    maxBytes=10 * 1024 * 1024,  # 10MB per file
+                    backupCount=5  # Keep 5 backup files
+                )
+                formatter = logging.Formatter(
+                    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+                )
+                handler.setFormatter(formatter)
+                self.security_logger.addHandler(handler)
+                logger.info(f"Security logging enabled with rotation to {self.log_file}")
+            except (OSError, IOError) as e:
+                logger.error(f"Failed to setup security log file {self.log_file}: {e}")
+                self.audit_enabled = False
+
+    def _validate_log_file_path(self, log_file_path: str) -> str:
+        """
+        Validate and sanitize the log file path.
+
+        Args:
+            log_file_path: Path to the log file
+
+        Returns:
+            Validated log file path
+        """
+        if not log_file_path:
+            return "security_audit.log"
+
+        # Ensure the path is safe (no path traversal)
+        log_file_path = os.path.basename(log_file_path)
+
+        # Ensure it's in a writable location
+        if not log_file_path.endswith('.log'):
+            log_file_path += '.log'
+
+        return log_file_path
 
     def log_security_event(
         self,
