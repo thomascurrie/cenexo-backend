@@ -39,6 +39,9 @@ class EnhancedLogger:
         self.logger = structlog.get_logger()
         self.audit_logger = logging.getLogger("audit")
 
+        # Ensure logs directory exists
+        os.makedirs("logs", exist_ok=True)
+
         # Configure audit logger
         audit_handler = logging.FileHandler("logs/audit.log")
         audit_handler.setLevel(logging.INFO)

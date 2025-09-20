@@ -7,7 +7,7 @@ import logging
 import importlib
 import inspect
 from typing import Dict, List, Optional, Type, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from .database import get_db
 from .database_models import Service, ServiceConfiguration, Tenant

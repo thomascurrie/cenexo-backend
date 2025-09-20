@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
-from fastapi import HTTPException
+from fastapi import HTTPException, Depends
 import ipaddress
 import os
 
@@ -18,7 +18,7 @@ from .models import (
 )
 from .celery_app import celery_app
 from .tasks.security_tasks import perform_security_scan
-from .auth import get_current_user, require_user, require_admin, UserRole
+from .auth import get_current_user, require_user, require_admin, require_viewer, UserRole
 from .rate_limiter import rate_limiter
 from .security_logger import security_logger
 

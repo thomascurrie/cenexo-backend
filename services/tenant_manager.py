@@ -9,7 +9,6 @@ from fastapi import Request, HTTPException, Depends
 from sqlalchemy.orm import Session
 from .database import get_db, get_tenant_context, TenantContext
 from .database_models import Tenant, User, AuditLog
-from .auth import get_current_user_optional
 import os
 
 logger = logging.getLogger(__name__)
