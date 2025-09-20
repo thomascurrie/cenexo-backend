@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 import os
 import uvicorn
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Import services
 from services import load_services
@@ -102,7 +102,7 @@ async def general_exception_handler(request: Request, exc: Exception):
         content={
             "error": "Internal server error",
             "error_code": "INTERNAL_ERROR",
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     )
 
@@ -116,7 +116,7 @@ async def root():
     return {
         "message": "Modular FastAPI Application",
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "services": ["security_scanner"]
     }
 
@@ -125,7 +125,7 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat() + "Z"
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 if __name__ == "__main__":
