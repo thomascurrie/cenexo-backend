@@ -5,7 +5,6 @@ Enhanced security scanner with multi-tenant support and improved architecture.
 
 import asyncio
 import logging
-import socket
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 from fastapi import HTTPException, Depends
@@ -97,8 +96,8 @@ class CenexoScannerService(BaseService):
             except ValueError:
                 # Target is hostname, resolve to IP and check asynchronously
                 try:
-                    # Use asyncio.get_event_loop().getaddrinfo for async DNS resolution
-                    loop = asyncio.get_event_loop()
+                    # Use asyncio.get_running_loop().getaddrinfo for async DNS resolution
+                    loop = asyncio.get_running_loop()
                     addr_info = await loop.getaddrinfo(target, None)
                     if addr_info:
                         # Get the first IP address from the resolved addresses
@@ -112,8 +111,8 @@ class CenexoScannerService(BaseService):
                                     break
                             except ValueError:
                                 logger.warning(f"Invalid network in allowlist for tenant {self.tenant.name}: {net_str}")
-                except Exception:
-                    logger.warning(f"Could not resolve hostname: {target}")
+                except OSError as e:
+                    logger.warning(f"Could not resolve hostname {target}: {e}")
                     # If hostname cannot be resolved, deny access
                     target_allowed = False
 
