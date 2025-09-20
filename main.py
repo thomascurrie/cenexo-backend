@@ -11,9 +11,13 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Import services
+# Import enhanced services and components
 from services import load_services
 from services.auth import API_KEY_HEADER
+from services.database import init_database, check_database_health
+from services.tenant_manager import TenantMiddleware
+from services.service_registry import create_service_discovery_router, create_service_registry_router
+from services.infrastructure.cenexo_scanner import CenexoScannerService
 
 # Configure logging
 logging.basicConfig(
@@ -22,11 +26,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Initialize database
+init_database()
+
 # Initialize FastAPI app
 app = FastAPI(
-    title="Modular FastAPI Application",
-    description="A modular FastAPI application with security best practices and pluggable services",
-    version="1.0.0"
+    title="Cenexo Unified Platform",
+    description="A unified, modular web platform for managing complex internet infrastructure and digital services with multi-tenant architecture",
+    version="2.0.0"
 )
 
 # Security middleware
@@ -42,6 +49,7 @@ app.add_middleware(
         "Content-Type",
         "Authorization",
         "X-API-Key",
+        "X-Tenant-ID",
         "X-Requested-With"
     ],
 )
@@ -50,6 +58,17 @@ app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 )
+
+# Tenant middleware for multi-tenant support
+app.add_middleware(TenantMiddleware)
+
+# Enhanced logging middleware
+from services.enhanced_logging import LoggingMiddleware
+app.add_middleware(LoggingMiddleware)
+
+# Monitoring middleware
+from services.monitoring import MonitoringMiddleware
+app.add_middleware(MonitoringMiddleware)
 
 # Custom middleware to extract API key from headers
 @app.middleware("http")
@@ -113,21 +132,79 @@ async def general_exception_handler(request: Request, exc: Exception):
 services_router = load_services()
 app.include_router(services_router)
 
+# Add service discovery and registry routers
+app.include_router(create_service_discovery_router())
+app.include_router(create_service_registry_router())
+
+# Add monitoring router
+from services.monitoring import create_monitoring_router
+app.include_router(create_monitoring_router())
+
+# Add admin interface router
+from services.admin_interface import create_admin_router
+app.include_router(create_admin_router())
+
 @app.get("/")
 async def root():
-    """Root endpoint - health check"""
+    """Root endpoint - platform information"""
+    db_health = check_database_health()
     return {
-        "message": "Modular FastAPI Application",
-        "status": "healthy",
+        "message": "Cenexo Unified Platform",
+        "description": "A unified, modular web platform for managing complex internet infrastructure and digital services",
+        "status": "healthy" if db_health["status"] == "healthy" else "degraded",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "services": ["security_scanner"]
+        "version": "2.0.0",
+        "services": ["cenexo_scanner", "service_discovery", "service_registry"],
+        "database": db_health,
+        "features": [
+            "Multi-tenant architecture",
+            "Service registry and discovery",
+            "Enhanced security controls",
+            "Audit logging",
+            "Configuration management"
+        ]
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Enhanced health check endpoint"""
+    db_health = check_database_health()
     return {
-        "status": "healthy",
+        "status": "healthy" if db_health["status"] == "healthy" else "degraded",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "database": db_health,
+        "services": {
+            "cenexo_scanner": "available",
+            "service_discovery": "available",
+            "service_registry": "available"
+        }
+    }
+
+@app.get("/platform/info")
+async def platform_info():
+    """Platform information endpoint"""
+    return {
+        "platform": "Cenexo Unified Platform",
+        "version": "2.0.0",
+        "description": "Unified platform for managing complex internet infrastructure and digital services",
+        "architecture": "Multi-tenant, service-oriented architecture",
+        "features": [
+            "Multi-tenant isolation",
+            "Dynamic service loading",
+            "Service registry and discovery",
+            "Enhanced security controls",
+            "Audit logging and monitoring",
+            "Configuration management",
+            "API versioning support"
+        ],
+        "services": [
+            {
+                "name": "cenexo_scanner",
+                "type": "security_scanner",
+                "description": "Enhanced network security scanner with multi-tenant support",
+                "version": "1.0.0"
+            }
+        ],
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
