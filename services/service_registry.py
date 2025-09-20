@@ -6,6 +6,7 @@ Provides dynamic service loading, configuration management, and service discover
 import logging
 import importlib
 import inspect
+import json
 from typing import Dict, List, Optional, Type, Any
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
@@ -14,8 +15,61 @@ from .database_models import Service, ServiceConfiguration, Tenant
 from .tenant_manager import get_current_tenant
 import os
 from datetime import datetime, timezone
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64
 
 logger = logging.getLogger(__name__)
+
+class EncryptionService:
+    """Service for encrypting/decrypting sensitive configuration data"""
+
+    def __init__(self):
+        """Initialize encryption service with key derivation"""
+        self._fernet = None
+        self._initialize_encryption()
+
+    def _initialize_encryption(self):
+        """Initialize encryption with key from environment"""
+        encryption_key = os.getenv("SERVICE_CONFIG_ENCRYPTION_KEY")
+        if not encryption_key:
+            logger.warning("SERVICE_CONFIG_ENCRYPTION_KEY not set - using development key")
+            # Use a fixed key for development (NOT for production)
+            encryption_key = "dev-encryption-key-change-in-production-32-chars!!"
+
+        # Derive key using PBKDF2
+        salt = b"cenexo-service-config-salt"  # Fixed salt for consistency
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(encryption_key.encode()))
+        self._fernet = Fernet(key)
+
+    def encrypt(self, data: str) -> str:
+        """Encrypt data and return base64 encoded string"""
+        if not self._fernet:
+            raise RuntimeError("Encryption service not initialized")
+        encrypted = self._fernet.encrypt(data.encode())
+        return base64.urlsafe_b64encode(encrypted).decode()
+
+    def decrypt(self, encrypted_data: str) -> str:
+        """Decrypt base64 encoded encrypted data"""
+        if not self._fernet:
+            raise RuntimeError("Encryption service not initialized")
+        try:
+            encrypted = base64.urlsafe_b64decode(encrypted_data)
+            decrypted = self._fernet.decrypt(encrypted)
+            return decrypted.decode()
+        except Exception as e:
+            logger.error(f"Failed to decrypt data: {e}")
+            raise ValueError("Failed to decrypt configuration data")
+
+# Global encryption service
+encryption_service = EncryptionService()
 
 class ServiceRegistry:
     """Manages service registration and configuration"""
@@ -38,7 +92,7 @@ class ServiceRegistry:
         """Get registered service class"""
         return self.registered_services.get(service_name)
 
-    def create_service_instance(self, service_name: str, tenant: Tenant, **kwargs) -> Any:
+    def create_service_instance(self, service_name: str, tenant: Tenant, db: Session = None, **kwargs) -> Any:
         """Create service instance for tenant"""
         service_class = self.get_service_class(service_name)
         if not service_class:
@@ -52,7 +106,7 @@ class ServiceRegistry:
 
         if instance_key not in self.service_instances:
             # Get service configuration
-            config = self.get_service_config(service_name, tenant.uuid)
+            config = self.get_service_config(service_name, tenant.uuid, db)
 
             # Create service instance
             service_instance = service_class(tenant=tenant, config=config, **kwargs)
@@ -62,33 +116,153 @@ class ServiceRegistry:
 
         return self.service_instances[instance_key]
 
-    def get_service_config(self, service_name: str, tenant_id: str) -> Dict:
+    def get_service_config(self, service_name: str, tenant_id: str, db: Session = None) -> Dict:
         """Get service configuration for tenant"""
         config_key = f"{tenant_id}:{service_name}"
 
         if config_key not in self.service_configs:
             # Load configuration from database or defaults
-            self.service_configs[config_key] = self._load_service_config(service_name, tenant_id)
+            self.service_configs[config_key] = self._load_service_config(service_name, tenant_id, db)
 
         return self.service_configs[config_key]
 
-    def _load_service_config(self, service_name: str, tenant_id: str) -> Dict:
+    def _load_service_config(self, service_name: str, tenant_id: str, db: Session = None) -> Dict:
         """Load service configuration from database"""
-        # This would typically load from the database
-        # For now, return default configuration
-        return {
+        # Default configuration
+        config = {
             "enabled": True,
             "version": "1.0.0",
             "timeout": 30,
             "max_concurrent_requests": 10
         }
 
-    def update_service_config(self, service_name: str, tenant_id: str, config: Dict):
+        # Try to load from database if db session provided
+        if db:
+            try:
+                # Find service by name and tenant
+                service = db.query(Service).filter(
+                    Service.name == service_name,
+                    Service.tenant_id == tenant_id
+                ).first()
+
+                if service:
+                    # Load configurations
+                    for service_config in service.configurations:
+                        if service_config.is_encrypted:
+                            # Decrypt the encrypted value
+                            try:
+                                decrypted_value = encryption_service.decrypt(service_config.config_value)
+                                # Parse JSON if it's a JSON object
+                                if decrypted_value.startswith('{') or decrypted_value.startswith('['):
+                                    config[service_config.config_key] = json.loads(decrypted_value)
+                                else:
+                                    config[service_config.config_key] = decrypted_value
+                            except Exception as e:
+                                logger.error(f"Failed to decrypt config {service_config.config_key}: {e}")
+                                # Fallback to plain text if decryption fails
+                                config[service_config.config_key] = service_config.config_value
+                        else:
+                            # Handle plain text values
+                            if service_config.config_value.startswith('{') or service_config.config_value.startswith('['):
+                                try:
+                                    config[service_config.config_key] = json.loads(service_config.config_value)
+                                except:
+                                    config[service_config.config_key] = service_config.config_value
+                            else:
+                                config[service_config.config_key] = service_config.config_value
+
+                    logger.debug(f"Loaded configuration for service {service_name} from database")
+            except Exception as e:
+                logger.error(f"Failed to load service config from database: {e}")
+
+        return config
+
+    def update_service_config(self, service_name: str, tenant_id: str, config: Dict, db: Session = None):
         """Update service configuration"""
         config_key = f"{tenant_id}:{service_name}"
         self.service_configs[config_key] = config
 
-        # In a real implementation, this would save to database
+        # Save to database if db session provided
+        if db:
+            try:
+                # Find or create service
+                service = db.query(Service).filter(
+                    Service.name == service_name,
+                    Service.tenant_id == tenant_id
+                ).first()
+
+                if not service:
+                    # Get tenant
+                    tenant = db.query(Tenant).filter(Tenant.uuid == tenant_id).first()
+                    if not tenant:
+                        logger.error(f"Tenant {tenant_id} not found for service config update")
+                        return
+
+                    # Create service if it doesn't exist
+                    service = Service(
+                        tenant_id=tenant.id,
+                        name=service_name,
+                        service_type=service_name,  # Use service name as type for now
+                        is_active=True
+                    )
+                    db.add(service)
+                    db.commit()
+                    db.refresh(service)
+
+                # Update configurations
+                for config_key, config_value in config.items():
+                    # Determine if this should be encrypted (sensitive config keys)
+                    sensitive_keys = {'password', 'secret', 'key', 'token', 'api_key', 'credentials'}
+                    should_encrypt = any(sensitive_key in config_key.lower() for sensitive_key in sensitive_keys)
+
+                    # Convert value to string for storage
+                    if isinstance(config_value, (dict, list)):
+                        value_str = json.dumps(config_value)
+                    else:
+                        value_str = str(config_value)
+
+                    # Encrypt if needed
+                    if should_encrypt:
+                        try:
+                            encrypted_value = encryption_service.encrypt(value_str)
+                            stored_value = encrypted_value
+                            is_encrypted = True
+                        except Exception as e:
+                            logger.error(f"Failed to encrypt config {config_key}: {e}")
+                            stored_value = value_str
+                            is_encrypted = False
+                    else:
+                        stored_value = value_str
+                        is_encrypted = False
+
+                    # Check if configuration already exists
+                    service_config = db.query(ServiceConfiguration).filter(
+                        ServiceConfiguration.service_id == service.id,
+                        ServiceConfiguration.config_key == config_key
+                    ).first()
+
+                    if service_config:
+                        # Update existing
+                        service_config.config_value = stored_value
+                        service_config.is_encrypted = is_encrypted
+                        service_config.updated_at = datetime.now(timezone.utc)
+                    else:
+                        # Create new
+                        service_config = ServiceConfiguration(
+                            service_id=service.id,
+                            config_key=config_key,
+                            config_value=stored_value,
+                            is_encrypted=is_encrypted
+                        )
+                        db.add(service_config)
+
+                db.commit()
+                logger.info(f"Updated configuration for service {service_name} in database")
+
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to update service config in database: {e}")
+
         logger.info(f"Updated configuration for {config_key}")
 
     def get_service_router(self, service_name: str, tenant: Tenant) -> APIRouter:
@@ -106,7 +280,7 @@ class ServiceRegistry:
         for service in services:
             try:
                 # Create service instance
-                service_instance = self.create_service_instance(service.service_type, tenant)
+                service_instance = self.create_service_instance(service.service_type, tenant, db)
 
                 # Add to main router
                 self.main_router.include_router(
@@ -268,19 +442,21 @@ def create_service_registry_router():
     async def update_service_config(
         service_name: str,
         config: Dict,
-        tenant: Tenant = Depends(get_current_tenant)
+        tenant: Tenant = Depends(get_current_tenant),
+        db: Session = Depends(get_db)
     ):
         """Update service configuration"""
-        service_registry.update_service_config(service_name, tenant.uuid, config)
+        service_registry.update_service_config(service_name, tenant.uuid, config, db)
         return {"message": "Configuration updated"}
 
     @router.get("/services/{service_name}/config")
     async def get_service_config(
         service_name: str,
-        tenant: Tenant = Depends(get_current_tenant)
+        tenant: Tenant = Depends(get_current_tenant),
+        db: Session = Depends(get_db)
     ):
         """Get service configuration"""
-        config = service_registry.get_service_config(service_name, tenant.uuid)
+        config = service_registry.get_service_config(service_name, tenant.uuid, db)
         return {"service": service_name, "config": config}
 
     return router

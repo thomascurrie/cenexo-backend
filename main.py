@@ -35,9 +35,21 @@ app = FastAPI(
 )
 
 # Security middleware
+def validate_cors_origins():
+    """Validate CORS origins to prevent credential leakage"""
+    origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+    # Clean up whitespace
+    origins = [origin.strip() for origin in origins if origin.strip()]
+
+    # Prevent wildcard with credentials
+    if True and "*" in origins:  # allow_credentials is hardcoded to True
+        raise ValueError("Cannot use wildcard origins (*) with allow_credentials=True")
+
+    return origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=validate_cors_origins(),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=[
@@ -85,10 +97,12 @@ async def security_headers_middleware(request: Request, call_next):
     # Security headers
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+    # Content Security Policy for API endpoints
+    response.headers["Content-Security-Policy"] = "default-src 'none'"
 
     # Remove server information
     response.headers.pop("Server", None)

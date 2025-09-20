@@ -3,7 +3,7 @@ Pydantic models for the services.
 Defines request and response schemas for all services.
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime, timezone
 import ipaddress
@@ -17,7 +17,8 @@ class PortInfo(BaseModel):
     version: Optional[str] = Field(None, description="Service version")
     protocol: str = Field(default="tcp", description="Protocol (tcp/udp)")
 
-    @validator('state')
+    @field_validator('state')
+    @classmethod
     def validate_state(cls, v):
         """Validate port state"""
         valid_states = ['open', 'closed', 'filtered', 'open|filtered', 'closed|filtered']
@@ -25,7 +26,8 @@ class PortInfo(BaseModel):
             raise ValueError(f'Port state must be one of: {valid_states}')
         return v
 
-    @validator('protocol')
+    @field_validator('protocol')
+    @classmethod
     def validate_protocol(cls, v):
         """Validate protocol"""
         valid_protocols = ['tcp', 'udp']
@@ -38,7 +40,8 @@ class ScanTarget(BaseModel):
     target: str = Field(..., description="IP address, CIDR, or hostname")
     ports: List[PortInfo] = Field(default_factory=list, description="Open ports found")
 
-    @validator('target')
+    @field_validator('target')
+    @classmethod
     def validate_target(cls, v):
         """Validate IP address, CIDR notation, or hostname"""
         # Check if it's a valid IP address
@@ -78,7 +81,8 @@ class ScanResult(BaseModel):
     duration: float = Field(..., description="Scan duration in seconds")
     status: str = Field(..., description="Scan status (completed, failed, partial)")
 
-    @validator('status')
+    @field_validator('status')
+    @classmethod
     def validate_status(cls, v):
         """Validate scan status"""
         valid_statuses = ['completed', 'failed', 'partial']
@@ -111,7 +115,8 @@ class ScanRequest(BaseModel):
         le=5
     )
 
-    @validator('targets')
+    @field_validator('targets')
+    @classmethod
     def validate_targets_list(cls, v):
         """Validate all targets in the list"""
         if not v:

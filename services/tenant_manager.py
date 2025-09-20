@@ -27,7 +27,7 @@ class TenantManager:
         tenant_id = request.headers.get(self.tenant_header_name)
 
         if tenant_id:
-            logger.info(f"Extracted tenant ID from header: {tenant_id}")
+            logger.debug(f"Extracted tenant ID from header: {tenant_id[:8]}...")
             return tenant_id
 
         # Try subdomain
@@ -35,8 +35,8 @@ class TenantManager:
         if "." in host:
             subdomain = host.split(".")[0]
             if subdomain and subdomain != "www":
-                logger.info(f"Extracted tenant from subdomain: {subdomain}")
-                return subdomain
+                    logger.debug(f"Extracted tenant from subdomain: {subdomain}")
+                    return subdomain
 
         return None
 
@@ -60,7 +60,7 @@ class TenantManager:
         ).first()
 
         if tenant and tenant.is_active:
-            logger.info(f"Found active tenant: {tenant.name} (ID: {tenant.uuid})")
+            logger.debug(f"Found active tenant: {tenant.name}")
             return tenant
         else:
             logger.warning(f"Tenant not found or inactive: {tenant_id}")

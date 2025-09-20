@@ -27,7 +27,7 @@ def create_admin_router():
         limit: int = 100,
         include_inactive: bool = False,
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """List all tenants"""
         query = db.query(Tenant)
@@ -61,7 +61,7 @@ def create_admin_router():
     async def create_tenant(
         tenant_data: dict,
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """Create a new tenant"""
         try:
@@ -118,7 +118,7 @@ def create_admin_router():
     async def get_tenant(
         tenant_id: str,
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """Get tenant details"""
         tenant = db.query(Tenant).filter(Tenant.uuid == tenant_id).first()
@@ -144,7 +144,7 @@ def create_admin_router():
         tenant_id: str,
         updates: dict,
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """Update tenant"""
         try:
@@ -168,7 +168,7 @@ def create_admin_router():
     async def deactivate_tenant(
         tenant_id: str,
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """Deactivate tenant"""
         try:
@@ -193,7 +193,7 @@ def create_admin_router():
         skip: int = 0,
         limit: int = 100,
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """List users across all tenants or specific tenant"""
         query = db.query(User)
@@ -232,7 +232,7 @@ def create_admin_router():
         skip: int = 0,
         limit: int = 100,
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """List services across all tenants or specific tenant"""
         query = db.query(Service)
@@ -277,7 +277,7 @@ def create_admin_router():
         skip: int = 0,
         limit: int = 100,
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """Get audit logs with filtering"""
         query = db.query(AuditLog)
@@ -332,7 +332,7 @@ def create_admin_router():
     @router.get("/platform/stats")
     async def get_platform_stats(
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """Get platform statistics"""
         total_tenants = db.query(Tenant).filter(Tenant.is_active == True).count()
@@ -367,7 +367,7 @@ def create_admin_router():
     @router.get("/health")
     async def admin_health_check(
         db: Session = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin())
     ):
         """Admin health check with detailed information"""
         from .monitoring import perform_health_checks

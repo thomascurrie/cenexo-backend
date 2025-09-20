@@ -279,7 +279,8 @@ def check_database_health() -> dict:
             }
 
         db = SessionLocal()
-        db.execute("SELECT 1")
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
         db.close()
 
         return {

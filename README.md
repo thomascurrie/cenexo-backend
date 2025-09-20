@@ -93,13 +93,15 @@ Comprehensive administrative interface for platform management.
    - For development: `ENVIRONMENT=development` (uses SQLite automatically)
    - For production: `ENVIRONMENT=production` (uses PostgreSQL)
 4. **Database Setup**:
-   - **Development (SQLite)**: No setup required - database files created automatically
-   - **Production (PostgreSQL)**: Create database and user
-   ```sql
-   CREATE DATABASE cenexo_platform;
-   CREATE USER cenexo_user WITH PASSWORD 'secure_password';
-   GRANT ALL PRIVILEGES ON DATABASE cenexo_platform TO cenexo_user;
-   ```
+  - **Development (SQLite)**: No setup required - database files created automatically
+  - **Production (PostgreSQL)**: Create database and user with minimal required privileges
+  ```sql
+  -- Use your secrets management system (Vault, AWS Secrets Manager, etc.)
+  -- to generate and store strong, unique passwords
+  CREATE DATABASE cenexo_platform;
+  CREATE USER cenexo_user WITH ENCRYPTED PASSWORD 'your_hashed_password_here';
+  GRANT CONNECT, CREATE ON DATABASE cenexo_platform TO cenexo_user;
+  ```
 5. **Install NMAP** (required for security scanner):
    ```bash
    # Ubuntu/Debian

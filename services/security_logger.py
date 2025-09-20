@@ -76,11 +76,14 @@ class SecurityLogger:
         # Ensure the path is safe (no path traversal)
         log_file_path = os.path.basename(log_file_path)
 
-        # Ensure it's in a writable location
+        # Ensure it's in a writable location with proper directory
+        log_dir = os.path.join(os.getcwd(), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+
         if not log_file_path.endswith('.log'):
             log_file_path += '.log'
 
-        return log_file_path
+        return os.path.join(log_dir, log_file_path)
 
     def log_security_event(
         self,

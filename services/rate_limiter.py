@@ -96,8 +96,16 @@ class RateLimiter:
 
         except redis.RedisError as e:
             logger.error(f"Redis error in rate limiting: {e}")
-            # Fail open in case of Redis issues
-            return True, None, None
+            # Configurable fail behavior based on environment
+            fail_closed = os.getenv("RATE_LIMIT_FAIL_CLOSED", "true").lower() == "true"
+            if fail_closed:
+                # Fail closed: block requests during Redis outage
+                logger.warning("Rate limiting failing closed due to Redis error")
+                return False, 0, 60  # Block for 60 seconds
+            else:
+                # Fail open: allow requests during Redis outage (less secure)
+                logger.warning("Rate limiting failing open due to Redis error")
+                return True, None, None
 
     def get_rate_limit_status(
         self,

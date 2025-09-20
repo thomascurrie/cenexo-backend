@@ -47,9 +47,20 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 # JWT settings
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-if not SECRET_KEY:
-    raise ValueError("JWT_SECRET_KEY environment variable must be set")
+def get_secret_key():
+    """Get JWT secret with validation - call this when needed, not at import time"""
+    secret = os.getenv("JWT_SECRET_KEY")
+    if not secret:
+        environment = os.getenv("ENVIRONMENT", "development")
+        if environment == "development":
+            logger.warning("JWT_SECRET_KEY not set - using development default. "
+                          "Set JWT_SECRET_KEY in production!")
+            return "dev-secret-change-in-production"
+        else:
+            logger.error("JWT_SECRET_KEY environment variable must be set in production")
+            raise ValueError("JWT_SECRET_KEY environment variable must be set")
+    return secret
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -163,7 +174,7 @@ class AuthService:
             "role": user.role,
             "exp": expire
         }
-        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        encoded_jwt = jwt.encode(to_encode, get_secret_key(), algorithm=ALGORITHM)
         return encoded_jwt
 
     def verify_token(self, token: str) -> Optional[User]:
@@ -177,7 +188,7 @@ class AuthService:
             User object if token is valid, None otherwise
         """
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token, get_secret_key(), algorithms=[ALGORITHM])
             username: str = payload.get("sub")
             role: str = payload.get("role")
 
