@@ -58,7 +58,7 @@ def test_scan_with_auth():
     scan_data = {
         "targets": ["127.0.0.1"],
         "scan_type": "basic",
-        "ports": "22,80,443",
+        "ports": "22,80,443,8000",
         "timeout": 30
     }
 

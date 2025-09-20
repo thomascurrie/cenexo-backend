@@ -309,9 +309,18 @@ def _run_nmap_scan(targets: List[str], arguments: List[str]) -> Dict[str, Any]:
         # Parse XML to get structured results
         try:
             root = ET.fromstring(xml_output)
+
+            # Debug: Log the XML structure
+            logger.info(f"XML parsing - Root tag: {root.tag}, Number of hosts: {len(root.findall('host'))}")
+
+            # Debug: Log first few lines of XML for inspection
+            xml_lines = xml_output.split('\n')[:10]
+            logger.info(f"XML output preview: {xml_lines}")
+
             return _parse_nmap_xml_results(root)
         except ET.ParseError as e:
             logger.error(f"Failed to parse NMAP XML output: {e}")
+            logger.error(f"XML content: {xml_output[:500]}...")  # Log first 500 chars
             raise Exception(f"Failed to parse NMAP XML output: {e}")
 
     except subprocess.TimeoutExpired:
@@ -338,6 +347,7 @@ def _parse_nmap_xml_results(xml_root) -> Dict[str, Any]:
     for host in xml_root.findall('host'):
         addresses = host.find('address')
         if addresses is None:
+            logger.warning("Host found without address element")
             continue
 
         # Get IP address
@@ -345,17 +355,23 @@ def _parse_nmap_xml_results(xml_root) -> Dict[str, Any]:
         if addresses.get('addrtype') == 'ipv4':
             ip_addr = addresses.get('addr', 'unknown')
 
+        logger.info(f"Processing host: {ip_addr}")
+
         # Parse ports
         ports = []
         ports_element = host.find('ports')
         if ports_element is not None:
+            logger.info(f"Found ports element with {len(ports_element.findall('port'))} ports")
             for port in ports_element.findall('port'):
                 portid = port.get('portid')
                 protocol = port.get('protocol', 'tcp')
 
+                logger.info(f"Processing port: {portid}, protocol: {protocol}")
+
                 if portid and protocol == 'tcp':
                     state_element = port.find('state')
-                    if state_element is not None and state_element.get('state') == 'open':
+                    if state_element is not None:
+                        port_state = state_element.get('state', 'unknown')
                         service_element = port.find('service')
                         service_name = 'unknown'
                         service_version = ''
@@ -364,14 +380,20 @@ def _parse_nmap_xml_results(xml_root) -> Dict[str, Any]:
                             service_name = service_element.get('name', 'unknown')
                             service_version = service_element.get('version', '')
 
+                        logger.info(f"Port {portid}: state={port_state}, service={service_name}")
                         ports.append({
                             'port': int(portid),
-                            'state': 'open',
+                            'state': port_state,
                             'service': service_name,
                             'version': service_version,
                             'protocol': 'tcp'
                         })
+                    else:
+                        logger.warning(f"Port {portid} has no state element")
+                else:
+                    logger.warning(f"Skipping port {portid} - invalid portid or protocol")
 
+        logger.info(f"Host {ip_addr} has {len(ports)} ports")
         results[ip_addr] = {
             'target': ip_addr,
             'ports': ports
@@ -394,16 +416,16 @@ def _parse_nmap_results(host_data: Dict[str, Any]) -> ScanTarget:
 
     if 'tcp' in host_data:
         for port, port_data in host_data['tcp'].items():
-            if port_data['state'] == 'open':
-                ports.append(PortInfo(
-                    port=int(port),
-                    state=port_data['state'],
-                    service=port_data.get('name', 'unknown'),
-                    version=port_data.get('version', ''),
-                    protocol='tcp'
-                ))
+            # Include all port states, not just open ones
+            ports.append(PortInfo(
+                port=int(port),
+                state=port_data['state'],
+                service=port_data.get('service', 'unknown'),
+                version=port_data.get('version', ''),
+                protocol='tcp'
+            ))
 
     return ScanTarget(
-        target=host_data.get('addresses', {}).get('ipv4', 'unknown'),
+        target=host_data.get('target', 'unknown'),
         ports=ports
     )
