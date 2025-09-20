@@ -414,7 +414,19 @@ def _parse_nmap_results(host_data: Dict[str, Any]) -> ScanTarget:
     """
     ports = []
 
-    if 'tcp' in host_data:
+    # Handle the new 'ports' list structure from XML parser
+    if 'ports' in host_data and isinstance(host_data['ports'], list):
+        for port_data in host_data['ports']:
+            # Map the port data to PortInfo
+            ports.append(PortInfo(
+                port=port_data.get('port', 0),
+                state=port_data.get('state', 'unknown'),
+                service=port_data.get('service', 'unknown'),
+                version=port_data.get('version', ''),
+                protocol=port_data.get('protocol', 'tcp')
+            ))
+    # Fallback to old 'tcp' dict structure for backward compatibility
+    elif 'tcp' in host_data:
         for port, port_data in host_data['tcp'].items():
             # Include all port states, not just open ones
             ports.append(PortInfo(
