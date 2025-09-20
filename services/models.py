@@ -84,7 +84,7 @@ class ScanRequest(BaseModel):
     scan_type: str = Field(
         default="comprehensive",
         description="Type of scan to perform",
-        regex="^(basic|comprehensive|custom)$"
+        pattern="^(basic|comprehensive|custom)$"
     )
     ports: str = Field(
         default="1-1024",

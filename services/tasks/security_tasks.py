@@ -96,7 +96,7 @@ def perform_security_scan(
         # Update task state to SUCCESS
         self.update_state(state='SUCCESS', meta={'status': 'Scan completed successfully'})
 
-        logger.info(f"Security scan task {task_id} completed in {duration".2f"} seconds")
+        logger.info(f"Security scan task {task_id} completed in {duration:.2f} seconds")
 
         return {
             'scan_id': task_id,
