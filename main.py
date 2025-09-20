@@ -26,8 +26,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize database
-init_database()
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -64,7 +62,6 @@ app.add_middleware(TenantMiddleware)
 
 # Enhanced logging middleware
 from services.enhanced_logging import LoggingMiddleware
-app.add_middleware(LoggingMiddleware)
 
 # Monitoring middleware
 from services.monitoring import MonitoringMiddleware
@@ -138,11 +135,14 @@ app.include_router(create_service_registry_router())
 
 # Add monitoring router
 from services.monitoring import create_monitoring_router
-app.include_router(create_monitoring_router())
 
 # Add admin interface router
 from services.admin_interface import create_admin_router
 app.include_router(create_admin_router())
+
+# Initialize database when running as main script
+if __name__ == "__main__":
+    init_database()
 
 @app.get("/")
 async def root():

@@ -12,7 +12,7 @@ import logging
 from .database import get_db
 from .database_models import Tenant, User, Service, ServiceConfiguration, AuditLog
 from .tenant_manager import tenant_manager, get_current_tenant, require_admin_tenant
-from .auth import get_current_user, require_admin
+from .auth import get_current_user, require_admin, get_password_hash
 from .enhanced_logging import enhanced_logger
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,7 @@ def create_admin_router():
     ):
         """Create a new tenant"""
         try:
+            # Create tenant using transaction context
             tenant = tenant_manager.create_tenant(
                 db=db,
                 name=tenant_data["name"],
@@ -72,13 +73,19 @@ def create_admin_router():
                 description=tenant_data.get("description")
             )
 
-            # Create default admin user for the tenant
-            from .auth import get_password_hash
+            # Create default admin user for the tenant within the same transaction
+            admin_password = tenant_data.get("admin_password")
+            if not admin_password:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Admin password is required for tenant creation"
+                )
+
             admin_user = User(
                 tenant_id=tenant.id,
                 username=f"admin_{tenant.name}",
                 email=tenant_data.get("admin_email", f"admin@{tenant.domain or 'localhost'}"),
-                hashed_password=get_password_hash(tenant_data.get("admin_password", "admin123")),
+                hashed_password=get_password_hash(admin_password),
                 role="admin",
                 is_active=True
             )

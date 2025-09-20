@@ -11,6 +11,7 @@ import json
 import os
 from sqlalchemy.orm import Session
 from .database_models import AuditLog, Tenant, User
+from fastapi import Request
 
 # Configure structlog
 structlog.configure(
@@ -98,7 +99,7 @@ class EnhancedLogger:
             task_id=task_id
         )
 
-    def log_audit_event(self, db: Session, tenant: Optional[Tenant] = None,
+    def log_audit_event(self, db: Optional[Session], tenant: Optional[Tenant] = None,
                        user: Optional[User] = None, action: str = "UNKNOWN",
                        resource_type: str = "unknown", resource_id: str = "",
                        details: dict = None, ip_address: str = None,
@@ -117,10 +118,12 @@ class EnhancedLogger:
                 timestamp=datetime.now(timezone.utc)
             )
 
-            db.add(audit_log)
-            db.commit()
+            # Only save to database if db session is provided
+            if db is not None:
+                db.add(audit_log)
+                db.commit()
 
-            # Also log to file
+            # Always log to file
             self.audit_logger.info(
                 f"AUDIT: {action} - {resource_type} - {resource_id}",
                 extra={
@@ -314,8 +317,11 @@ def setup_logging():
     error_handler.setFormatter(formatter)
     security_handler.setFormatter(formatter)
 
-    # Get root logger and add handlers
+    # Get root logger and clear existing handlers
     root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+
+    # Add handlers
     root_logger.addHandler(main_handler)
     root_logger.addHandler(error_handler)
 
@@ -326,10 +332,5 @@ def setup_logging():
     # Set log levels
     root_logger.setLevel(logging.INFO)
     security_logger.setLevel(logging.WARNING)
-
-    # Prevent duplicate logs
-    root_logger.handlers.clear()
-    root_logger.addHandler(main_handler)
-    root_logger.addHandler(error_handler)
 
     structlog.get_logger().info("Enhanced logging system initialized")

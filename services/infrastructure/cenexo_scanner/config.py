@@ -4,7 +4,7 @@ Handles service-specific configuration and validation.
 """
 
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field, validator
 import logging
 
@@ -30,7 +30,6 @@ class ScannerConfig(BaseModel):
     # Security controls
     scan_authorization_required: bool = Field(default=True, description="Require authorization for scanning")
     scan_audit_log_enabled: bool = Field(default=True, description="Enable audit logging for scans")
-    scan_max_concurrent_scans: int = Field(default=3, description="Maximum concurrent scans allowed", ge=1, le=20)
     scan_max_duration: int = Field(default=600, description="Maximum scan duration in seconds", ge=60, le=3600)
 
     # Service configuration

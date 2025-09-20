@@ -3,7 +3,7 @@ Enhanced database models for multi-tenant architecture.
 Provides tenant isolation, user management, and service configuration.
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -76,7 +76,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     uuid = Column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    username = Column(String(50), unique=True, index=True, nullable=False)
+    username = Column(String(50), index=True, nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(20), default="user", nullable=False)
@@ -88,6 +88,11 @@ class User(Base):
     # Relationships
     tenant = relationship("Tenant", back_populates="users")
     audit_logs = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
+
+    # Unique constraint: username must be unique within each tenant
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'username', name='unique_tenant_username'),
+    )
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', tenant_id={self.tenant_id})>"

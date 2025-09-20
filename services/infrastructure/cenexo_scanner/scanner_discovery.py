@@ -94,8 +94,23 @@ class CenexoScannerService(BaseService):
                     except ValueError:
                         logger.warning(f"Invalid network in allowlist for tenant {self.tenant.name}: {net_str}")
             except ValueError:
-                # Target is hostname, not IP - allow for now
-                target_allowed = True
+                # Target is hostname, resolve to IP and check
+                try:
+                    import socket
+                    resolved_ip = socket.gethostbyname(target)
+                    resolved_ip_obj = ipaddress.ip_address(resolved_ip)
+                    for net_str in allowed_nets:
+                        try:
+                            net = ipaddress.ip_network(net_str.strip(), strict=False)
+                            if resolved_ip_obj in net:
+                                target_allowed = True
+                                break
+                        except ValueError:
+                            logger.warning(f"Invalid network in allowlist for tenant {self.tenant.name}: {net_str}")
+                except socket.gaierror:
+                    logger.warning(f"Could not resolve hostname: {target}")
+                    # If hostname cannot be resolved, deny access
+                    target_allowed = False
 
             if not target_allowed:
                 raise HTTPException(

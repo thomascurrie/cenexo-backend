@@ -41,11 +41,11 @@ class DatabaseConfig:
             # Use PostgreSQL for production
             self.database_url = os.getenv(
                 "DATABASE_URL",
-                "postgresql://user:password@localhost:5432/cenexo_platform"
+                "postgresql://localhost:5432/cenexo_platform"
             )
             self.test_database_url = os.getenv(
                 "TEST_DATABASE_URL",
-                "postgresql://test_user:test_password@localhost:5432/cenexo_test"
+                "postgresql://localhost:5432/cenexo_test"
             )
             self.pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
             self.max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "20"))
@@ -117,7 +117,7 @@ def init_database(test_mode: bool = False):
     """Initialize database and create tables"""
     global SessionLocal
 
-    engine = get_database_engine(test_mode=test_mode)
+    engine = create_database_engine(test_mode=test_mode)
 
     # Create all tables
     Base.metadata.create_all(bind=engine)
@@ -199,6 +199,9 @@ def get_tenant_context() -> TenantContext:
 @contextmanager
 def get_tenant_db_session(tenant_id: Optional[str] = None):
     """Get database session with tenant context"""
+    if SessionLocal is None:
+        raise RuntimeError("Database not initialized. Call init_database() first.")
+
     db = SessionLocal()
     try:
         # Set tenant context if tenant_id provided
@@ -240,15 +243,20 @@ def get_or_create_tenant(db: Session, name: str, domain: Optional[str] = None) -
 
     return tenant
 
-def create_default_admin_user(db: Session, tenant: Tenant) -> User:
+def create_default_admin_user(db: Session, tenant: Tenant, password: str = None) -> User:
     """Create default admin user for tenant"""
     from .auth import get_password_hash
+
+    if password is None:
+        password = os.getenv("DEFAULT_ADMIN_PASSWORD")
+        if not password:
+            raise ValueError("Admin password must be provided via parameter or DEFAULT_ADMIN_PASSWORD environment variable")
 
     admin_user = User(
         tenant_id=tenant.id,
         username="admin",
         email=f"admin@{tenant.domain or 'localhost'}",
-        hashed_password=get_password_hash("admin123"),  # Change in production!
+        hashed_password=get_password_hash(password),
         role="admin",
         is_active=True
     )

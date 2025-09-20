@@ -7,7 +7,8 @@ import time
 import psutil
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from fastapi import Request, Response
+from fastapi import Request
+from fastapi.responses import Response
 from prometheus_client import Counter, Histogram, Gauge, Info, Enum
 import logging
 from .database import check_database_health
