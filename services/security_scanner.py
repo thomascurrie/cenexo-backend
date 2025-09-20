@@ -18,6 +18,9 @@ from .models import (
 )
 from .celery_app import celery_app
 from .tasks.security_tasks import perform_security_scan
+from .auth import get_current_user, require_user, require_admin, UserRole
+from .rate_limiter import rate_limiter
+from .security_logger import security_logger
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +39,18 @@ class SecurityScannerService(BaseService):
         # Setup routes
         self.setup_routes()
 
-    async def _check_authorization(self):
+    async def _check_authorization(self, user):
         """Check if the scan request is authorized"""
-        # For now, check environment variable
-        # In production, this should check JWT tokens, API keys, etc.
-        if os.getenv("SCAN_AUTHORIZATION_REQUIRED", "false").lower() == "true":
-            # TODO: Implement proper authentication
-            # For now, just log the authorization check
-            logger.info("Authorization check passed (environment-based)")
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required for scan operations"
+            )
+
+        # Check if authorization is required
+        if os.getenv("SCAN_AUTHORIZATION_REQUIRED", "true").lower() == "true":
+            # Log successful authorization
+            logger.info(f"Authorization check passed for user: {user.username} (role: {user.role})")
         else:
             logger.info("Authorization check skipped (not required)")
 
@@ -77,65 +84,108 @@ class SecurityScannerService(BaseService):
                     detail=f"Target {target} not in allowed networks: {allowed_networks}"
                 )
 
-    async def _check_rate_limit(self):
+    async def _check_rate_limit(self, user):
         """Check rate limiting for scan requests"""
-        # TODO: Implement proper rate limiting with Redis
-        # For now, just log the check
-        logger.info("Rate limit check passed (not implemented)")
+        # Check rate limit for scan endpoint
+        allowed, remaining, reset_time = rate_limiter.check_rate_limit(
+            user=user,
+            endpoint="scan",
+            limit=None,  # Use role-based limits
+            window_minutes=1
+        )
 
-    async def _log_scan_request(self, task_id: str, request: ScanRequest):
+        if not allowed:
+            # Log rate limit violation
+            security_logger.log_rate_limit_exceeded(
+                user=user,
+                endpoint="scan"
+            )
+
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "Rate limit exceeded",
+                    "error_code": "RATE_LIMIT_EXCEEDED",
+                    "details": {
+                        "retry_after": reset_time,
+                        "message": "Too many scan requests. Please try again later."
+                    }
+                }
+            )
+
+        logger.info(f"Rate limit check passed for user {user.username if user else 'anonymous'}. "
+                   f"Remaining requests: {remaining if remaining is not None else 'unlimited'}")
+
+    async def _log_scan_request(self, task_id: str, request: ScanRequest, user):
         """Log scan request for audit purposes"""
-        if os.getenv("SCAN_AUDIT_LOG_ENABLED", "false").lower() == "true":
-            logger.info(f"AUDIT: Scan task {task_id} requested for targets: {request.targets}")
-        else:
-            logger.info(f"Scan task {task_id} requested for targets: {request.targets}")
+        # Use comprehensive security logging
+        security_logger.log_scan_started(
+            user=user,
+            targets=request.targets,
+            scan_type=request.scan_type
+        )
+
+        # Also log to regular logger for monitoring
+        logger.info(
+            f"Scan task {task_id} requested by user {user.username} (role: {user.role}) "
+            f"for {len(request.targets)} targets"
+        )
 
     def setup_routes(self):
         """Setup the security scanner routes."""
 
         @self.router.post("/scan")
-        async def start_scan(request: ScanRequest):
+        async def start_scan(
+            request: ScanRequest,
+            user = Depends(require_user)
+        ):
             """
             Start a security scan task on the specified targets.
 
             Args:
                 request: ScanRequest containing targets and scan parameters
+                user: Authenticated user
 
             Returns:
                 Dictionary with task_id and status
             """
             try:
                 # Security checks
-                await self._check_authorization()
+                await self._check_authorization(user)
                 self._check_target_allowlist(request.targets)
-                await self._check_rate_limit()
+                await self._check_rate_limit(user)
 
                 # Validate targets
                 validated_targets = await self._validate_targets(request.targets)
 
                 # Audit logging
-                task_id = await self._log_scan_request("pending", request)
+                task_id = await self._log_scan_request("pending", request, user)
 
-                logger.info(f"Starting scan task for targets: {request.targets}")
+                logger.info(f"Starting scan task for targets: {request.targets} by user: {user.username}")
 
                 # Prepare task data
                 task_data = {
                     'targets': validated_targets,
                     'scan_type': request.scan_type,
                     'ports': request.ports,
-                    'timeout': request.timeout
+                    'timeout': request.timeout,
+                    'user_id': user.username,
+                    'user_role': user.role
                 }
 
                 # Trigger Celery task
                 celery_task = perform_security_scan.delay(task_data)
 
-                logger.info(f"Scan task {celery_task.id} started for targets: {request.targets}")
+                logger.info(f"Scan task {celery_task.id} started for targets: {request.targets} by user: {user.username}")
                 return {
                     "task_id": celery_task.id,
                     "status": "PENDING",
                     "message": "Scan task started successfully"
                 }
 
+            except HTTPException:
+                # Re-raise HTTP exceptions as-is
+                raise
             except Exception as e:
                 logger.error(f"Failed to start scan task: {str(e)}")
                 raise HTTPException(
@@ -148,12 +198,16 @@ class SecurityScannerService(BaseService):
                 )
 
         @self.router.get("/scan/{task_id}")
-        async def get_scan_result(task_id: str):
+        async def get_scan_result(
+            task_id: str,
+            user = Depends(require_viewer)
+        ):
             """
             Retrieve a scan result by task ID.
 
             Args:
                 task_id: Unique identifier of the scan task
+                user: Authenticated user
 
             Returns:
                 ScanResult for the specified task
@@ -226,12 +280,16 @@ class SecurityScannerService(BaseService):
                 )
 
         @self.router.get("/tasks/{task_id}/status")
-        async def get_task_status(task_id: str):
+        async def get_task_status(
+            task_id: str,
+            user = Depends(require_viewer)
+        ):
             """
             Get the status of a scan task.
 
             Args:
                 task_id: Unique identifier of the scan task
+                user: Authenticated user
 
             Returns:
                 Dictionary with task status information

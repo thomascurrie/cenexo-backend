@@ -55,8 +55,16 @@ class ScanTarget(BaseModel):
         except ValueError:
             pass
 
-        # Check if it's a valid hostname
+        # Check if it's a valid hostname with stricter validation
+        # RFC 1123 compliant hostname validation
         if re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$', v):
+            # Additional security checks
+            if len(v) > 253:  # Max hostname length
+                raise ValueError('Hostname too long')
+            if v.count('.') > 127:  # Max label count
+                raise ValueError('Too many subdomain levels')
+            if any(len(label) > 63 for label in v.split('.')):  # Max label length
+                raise ValueError('Label too long')
             return v
 
         raise ValueError('Target must be a valid IP address, CIDR notation, or hostname')

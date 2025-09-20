@@ -6,6 +6,8 @@ This module contains the background tasks for NMAP scanning.
 import nmap
 import time
 import logging
+import subprocess
+import shlex
 from typing import Dict, List, Any
 from datetime import datetime, timezone
 from celery import current_task
@@ -56,7 +58,7 @@ def perform_security_scan(
         # Update task state
         self.update_state(state='STARTED', meta={'status': 'Configuring scan parameters'})
 
-        # Configure scan arguments
+        # Configure scan arguments securely
         scan_args = _get_scan_arguments(scan_type, ports, timeout)
 
         # Update task state
@@ -64,7 +66,7 @@ def perform_security_scan(
 
         # Perform the scan
         start_time = time.time()
-        scan_result = _run_nmap_scan(nm, targets, scan_args)
+        scan_result = _run_nmap_scan(targets, scan_args)
         duration = time.time() - start_time
 
         # Update task state
@@ -117,9 +119,9 @@ def perform_security_scan(
         raise self.retry(exc=exc, countdown=60)  # Retry after 60 seconds
 
 
-def _get_scan_arguments(scan_type: str, ports: str, timeout: int) -> str:
+def _get_scan_arguments(scan_type: str, ports: str, timeout: int) -> List[str]:
     """
-    Get NMAP arguments based on scan type.
+    Get NMAP arguments based on scan type using secure argument list.
 
     Args:
         scan_type: Type of scan
@@ -127,32 +129,83 @@ def _get_scan_arguments(scan_type: str, ports: str, timeout: int) -> str:
         timeout: Scan timeout
 
     Returns:
-        NMAP arguments string
+        List of NMAP arguments for subprocess
     """
-    # Validate ports first
+    # Validate and sanitize inputs
     validated_ports = _validate_ports(ports)
+    validated_scan_type = _validate_scan_type(scan_type)
+    validated_timeout = _validate_timeout(timeout)
 
-    base_args = f"-T3 --host-timeout {timeout}s"
+    # Build argument list securely
+    base_args = ["nmap", "-T3", f"--host-timeout={validated_timeout}s"]
 
-    if scan_type == "basic":
-        return f"{base_args} -sS -p {validated_ports}"
-    elif scan_type == "comprehensive":
-        return f"{base_args} -sS -sV -p {validated_ports} --script banner"
-    elif scan_type == "custom":
-        return f"{base_args} -sS -sV -p {validated_ports}"
+    # Add scan type specific arguments
+    if validated_scan_type == "basic":
+        base_args.extend(["-sS", f"-p={validated_ports}"])
+    elif validated_scan_type == "comprehensive":
+        base_args.extend(["-sS", "-sV", f"-p={validated_ports}", "--script=banner"])
+    elif validated_scan_type == "custom":
+        base_args.extend(["-sS", "-sV", f"-p={validated_ports}"])
+    else:
+        base_args.extend(["-sS", f"-p={validated_ports}"])
 
-    return f"{base_args} -sS -p {validated_ports}"
+    return base_args
+
+
+def _validate_scan_type(scan_type: str) -> str:
+    """
+    Validate scan type parameter.
+
+    Args:
+        scan_type: Type of scan to validate
+
+    Returns:
+        Validated scan type
+
+    Raises:
+        ValueError: If scan type is invalid
+    """
+    if not scan_type or not isinstance(scan_type, str):
+        raise ValueError("Scan type must be a non-empty string")
+
+    valid_types = ["basic", "comprehensive", "custom"]
+    if scan_type not in valid_types:
+        raise ValueError(f"Invalid scan type '{scan_type}'. Must be one of: {valid_types}")
+
+    return scan_type
+
+
+def _validate_timeout(timeout: int) -> int:
+    """
+    Validate timeout parameter.
+
+    Args:
+        timeout: Timeout value to validate
+
+    Returns:
+        Validated timeout
+
+    Raises:
+        ValueError: If timeout is invalid
+    """
+    if not isinstance(timeout, int):
+        raise ValueError("Timeout must be an integer")
+
+    if timeout < 30 or timeout > 3600:
+        raise ValueError("Timeout must be between 30 and 3600 seconds")
+
+    return timeout
 
 
 def _validate_ports(ports: str) -> str:
     """
-    Validate and sanitize ports parameter to prevent command injection.
+    Validate ports parameter securely.
 
     Args:
         ports: Port specification string
 
     Returns:
-        Sanitized ports string
+        Validated ports string
 
     Raises:
         ValueError: If ports specification is invalid
@@ -160,14 +213,12 @@ def _validate_ports(ports: str) -> str:
     if not ports or not ports.strip():
         raise ValueError("Ports specification cannot be empty")
 
-    # Remove any potentially dangerous characters
     ports = ports.strip()
 
-    # Check for shell metacharacters and other dangerous patterns
-    dangerous_patterns = [';', '&', '|', '$', '(', ')', '`', '\n', '\r', '\t']
-    for pattern in dangerous_patterns:
-        if pattern in ports:
-            raise ValueError(f"Invalid character '{pattern}' in ports specification")
+    # Only allow specific characters: digits, commas, hyphens, and "all"
+    allowed_chars = set("0123456789,- all")
+    if not all(c in allowed_chars for c in ports):
+        raise ValueError("Ports specification contains invalid characters")
 
     # Validate port ranges and individual ports
     if ports == "all":
@@ -208,30 +259,122 @@ def _validate_ports(ports: str) -> str:
     return ports
 
 
-def _run_nmap_scan(nm: nmap.PortScanner, targets: List[str], arguments: str) -> Dict[str, Any]:
+def _run_nmap_scan(targets: List[str], arguments: List[str]) -> Dict[str, Any]:
     """
-    Run NMAP scan synchronously.
+    Run NMAP scan securely using subprocess.
 
     Args:
-        nm: NMAP scanner instance
         targets: List of targets to scan
-        arguments: NMAP arguments
+        arguments: List of NMAP arguments
 
     Returns:
         NMAP scan results
+
+    Raises:
+        Exception: If NMAP scan fails
     """
     try:
-        # Join targets with spaces for NMAP
-        target_string = " ".join(targets)
+        # Build the complete command
+        cmd = arguments + targets
 
-        # Perform the scan
-        nm.scan(target_string, arguments=arguments)
+        logger.info(f"Executing secure NMAP scan: {' '.join(cmd)}")
 
-        # Use public API instead of private attribute
-        return dict(nm.get_nmap_last_output())
+        # Run NMAP using subprocess with shell=False for security
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=1800,  # 30 minute timeout
+            check=False  # Don't raise exception on non-zero exit codes
+        )
+
+        if result.returncode != 0:
+            logger.error(f"NMAP scan failed with return code {result.returncode}: {result.stderr}")
+            raise Exception(f"NMAP scan failed: {result.stderr}")
+
+        # Parse the XML output
+        import xml.etree.ElementTree as ET
+
+        # Find the XML output in the result
+        xml_start = result.stdout.find('<?xml')
+        if xml_start == -1:
+            logger.error("No XML output found in NMAP results")
+            raise Exception("No XML output found in NMAP results")
+
+        xml_output = result.stdout[xml_start:]
+
+        # Parse XML to get structured results
+        try:
+            root = ET.fromstring(xml_output)
+            return _parse_nmap_xml_results(root)
+        except ET.ParseError as e:
+            logger.error(f"Failed to parse NMAP XML output: {e}")
+            raise Exception(f"Failed to parse NMAP XML output: {e}")
+
+    except subprocess.TimeoutExpired:
+        logger.error("NMAP scan timed out")
+        raise Exception("NMAP scan timed out")
     except Exception as e:
         logger.error(f"NMAP scan failed: {str(e)}")
         raise Exception(f"NMAP scan failed: {str(e)}")
+
+
+def _parse_nmap_xml_results(xml_root) -> Dict[str, Any]:
+    """
+    Parse NMAP XML results into structured data.
+
+    Args:
+        xml_root: XML root element from NMAP output
+
+    Returns:
+        Dictionary with scan results
+    """
+    results = {}
+
+    # Parse each host
+    for host in xml_root.findall('host'):
+        addresses = host.find('address')
+        if addresses is None:
+            continue
+
+        # Get IP address
+        ip_addr = 'unknown'
+        if addresses.get('addrtype') == 'ipv4':
+            ip_addr = addresses.get('addr', 'unknown')
+
+        # Parse ports
+        ports = []
+        ports_element = host.find('ports')
+        if ports_element is not None:
+            for port in ports_element.findall('port'):
+                portid = port.get('portid')
+                protocol = port.get('protocol', 'tcp')
+
+                if portid and protocol == 'tcp':
+                    state_element = port.find('state')
+                    if state_element is not None and state_element.get('state') == 'open':
+                        service_element = port.find('service')
+                        service_name = 'unknown'
+                        service_version = ''
+
+                        if service_element is not None:
+                            service_name = service_element.get('name', 'unknown')
+                            service_version = service_element.get('version', '')
+
+                        ports.append({
+                            'port': int(portid),
+                            'state': 'open',
+                            'service': service_name,
+                            'version': service_version,
+                            'protocol': 'tcp'
+                        })
+
+        results[ip_addr] = {
+            'target': ip_addr,
+            'ports': ports
+        }
+
+    return results
 
 
 def _parse_nmap_results(host_data: Dict[str, Any]) -> ScanTarget:
