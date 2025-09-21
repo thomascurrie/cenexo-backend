@@ -10,7 +10,7 @@ celery==5.3.4
 flower==2.0.1
 PyJWT==2.8.0
 passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
+python-multipart==0.0.18
 
 # Database and ORM
 sqlalchemy==2.0.23
@@ -44,3 +44,5 @@ cryptography>=42.0.4
 black==23.11.0
 isort==5.12.0
 flake8==6.1.0
+tornado>=6.5 # not directly required, pinned by Snyk to avoid a vulnerability
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
